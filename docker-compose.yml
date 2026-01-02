@@ -1,0 +1,179 @@
+version: '3.8'
+
+# This Docker Compose file is designed for a production-ready Docker Swarm deployment.
+# It includes a frontend, a backend, a database, a cache, and a reverse proxy.
+
+services:
+  frontend:
+    image: frontend-app
+    build:
+      context: ./frontend
+    networks:
+      - frontend-net
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        # Rule to route traffic for localhost to the frontend service.
+        - "traefik.http.routers.frontend.rule=Host(`localhost`) && PathPrefix(`/`)"
+        # Use the 'web' entrypoint for HTTP.
+        - "traefik.http.routers.frontend.entrypoints=web"
+        # Define the load balancer server port for the frontend service.
+        - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+        - "traefik.docker.network=frontend-net"
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: localhost:24224
+        tag: "docker.{{.Name}}"
+
+  backend:
+    image: backend-app
+    build:
+      context: ./backend
+    networks:
+      - backend-net
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER_FILE=/run/secrets/postgres_user
+      - DB_NAME_FILE=/run/secrets/postgres_db
+      - DB_PASSWORD_FILE=/run/secrets/postgres_password
+      - REDIS_URI=redis://redis:6379
+    secrets:
+      - postgres_user
+      - postgres_password
+      - postgres_db
+    deploy:
+      # Replicated service with 3 replicas for high availability.
+      replicas: 3
+      update_config:
+        # Update 2 replicas at a time.
+        parallelism: 2
+        # Wait 10 seconds between updating replicas.
+        delay: 10s
+        # Rollback the update on failure.
+        failure_action: rollback
+      rollback_config:
+        # Rollback 1 replica at a time.
+        parallelism: 1
+        # Stop the old task before starting the new one.
+        order: stop-first
+        # If rollback fails, pause the rollback.
+        failure_action: pause
+      placement:
+        # Spread replicas across nodes with the 'region' label.
+        # This requires nodes to be labeled, e.g., 'docker node update --label-add region=us-east-1 my-node'
+        preferences:
+          - spread: node.labels.region
+      resources:
+        # Limit the service to use at most 50% of a CPU and 256MB of RAM.
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        # Reserve 25% of a CPU and 128MB of RAM for the service.
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        # Rule to route traffic for localhost/api to the backend service.
+        - "traefik.http.routers.backend.rule=Host(`localhost`) && PathPrefix(`/api`)"
+        # Use the 'web' entrypoint for HTTP.
+        - "traefik.http.routers.backend.entrypoints=web"
+        # Apply middlewares for API stripping and rate limiting.
+        - "traefik.http.routers.backend.middlewares=api-strip"
+        # Define the API stripping middleware.
+        - "traefik.http.middlewares.api-strip.stripprefix.prefixes=/api"
+        # Define the load balancer server port for the backend service.
+        - "traefik.http.services.backend.loadbalancer.server.port=3000"
+        # Enable sticky sessions for the backend service.
+        - "traefik.http.services.backend.loadbalancer.sticky.cookie=true"
+        - "traefik.docker.network=backend-net"
+    healthcheck:
+      test: ["NONE"]
+
+  postgres:
+    image: postgres:14-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend-net
+    environment:
+      - POSTGRES_DB_FILE=/run/secrets/postgres_db
+      - POSTGRES_USER_FILE=/run/secrets/postgres_user
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+    secrets:
+      - postgres_user
+      - postgres_password
+      - postgres_db
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  redis:
+    image: redis:alpine
+    networks:
+      - backend-net
+
+  traefik:
+    image: traefik:v2.9
+    ports:
+      - "80:80"
+      - "443:443"
+      # The Traefik dashboard is available on port 8080
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    networks:
+      - public-net
+      - frontend-net
+      - backend-net
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+networks:
+  public-net:
+    driver: overlay
+    name: public-net
+  frontend-net:
+    driver: overlay
+    name: frontend-net
+    driver_opts:
+      encrypted: "true"
+  backend-net:
+    driver: overlay
+    name: backend-net
+    driver_opts:
+      encrypted: "true"
+  monitoring-net:
+    driver: overlay
+    name: monitoring-net
+    driver_opts:
+      encrypted: "true"
+
+volumes:
+  postgres_data:
+
+secrets:
+  postgres_user:
+    external: true
+  postgres_password:
+    external: true
+  postgres_db:
+    external: true

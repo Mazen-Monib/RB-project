@@ -1,0 +1,59 @@
+version: '3.8'
+
+# This Docker Compose file is designed for local development and testing.
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    networks:
+      - local-net
+    volumes:
+      # Prevent node_modules from being overwritten by the volume mount
+      - /app/node_modules
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      # Expose backend on 3001 to avoid conflict with frontend
+      - "3001:3000"
+    networks:
+      - local-net
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      # Prevent node_modules from being overwritten by the volume mount
+      - /usr/src/app/node_modules
+
+  postgres:
+    image: postgres:14-alpine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_local:/var/lib/postgresql/data
+    networks:
+      - local-net
+    env_file:
+      - .env
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - local-net
+
+networks:
+  local-net:
+    driver: bridge
+
+volumes:
+  postgres_data_local:

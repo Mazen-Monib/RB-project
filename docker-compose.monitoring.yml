@@ -1,0 +1,125 @@
+version: '3.8'
+
+# This Docker Compose file is for the monitoring stack, including Prometheus,
+# Grafana, Node Exporter, and cAdvisor.
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - prometheus_config:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)'
+    ports:
+      - "9100:9100"
+    networks:
+      - monitoring-net
+    deploy:
+      mode: global
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "8081:8080"
+    networks:
+      - monitoring-net
+    deploy:
+      mode: global
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - monitoring-net
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+  fluentd:
+    image: fluent/fluentd:latest
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    volumes:
+      - fluentd_config:/fluentd/etc
+      - fluentd_log:/fluentd/log
+    networks:
+      - monitoring-net
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    command: -H unix:///var/run/docker.sock
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - monitoring-net
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports:
+      - "9093:9093"
+    volumes:
+      - alertmanager_config:/config
+    networks:
+      - monitoring-net
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+networks:
+  monitoring-net:
+    driver: overlay
+    attachable: true
+
+volumes:
+  prometheus_config:
+  prometheus_data:
+  grafana_data:
+  fluentd_config:
+  fluentd_log:
+  portainer_data:
+  alertmanager_config:

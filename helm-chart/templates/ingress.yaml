@@ -1,0 +1,25 @@
+{{- if .Values.ingress.enabled -}}
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "my-app.fullname" . }}
+  labels:
+    {{- include "my-app.labels" . | nindent 4 }}
+spec:
+  entrypoints:
+    - websecure
+  routes:
+    - match: Host(`{{ .Values.ingress.hosts.0.host }}`) && PathPrefix(`{{ .Values.ingress.hosts.0.paths.0.path }}`)
+      kind: Rule
+      services:
+        - name: frontend
+          port: {{ .Values.ingress.hosts.0.paths.0.service.port }}
+    - match: Host(`{{ .Values.ingress.hosts.0.host }}`) && PathPrefix(`{{ .Values.ingress.hosts.0.paths.1.path }}`)
+      kind: Rule
+      services:
+        - name: backend
+          port: {{ .Values.ingress.hosts.0.paths.1.service.port }}
+  tls:
+    secretName: {{ .Values.ingress.hosts.0.host | replace "." "-" }}-tls
+---
+{{- end }}

@@ -1,0 +1,47 @@
+groups:
+- name: swarm_alerts
+  rules:
+  - alert: ServiceReplicaDown
+    expr: sum(docker_swarm_service_replicas) by (service_name) < sum(docker_swarm_service_desired_replicas) by (service_name)
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Service {{ $labels.service_name }} has a replica down"
+      description: "The number of running replicas for service {{ $labels.service_name }} is less than the desired number."
+
+  - alert: NodeDown
+    expr: up == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Node {{ $labels.instance }} is down"
+      description: "The node-exporter on node {{ $labels.instance }} has been down for more than 5 minutes."
+
+  - alert: HighMemoryUsage
+    expr: (sum(container_memory_usage_bytes) by (name) / sum(container_spec_memory_limit_bytes) by (name)) * 100 > 90
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High memory usage on container {{ $labels.name }}"
+      description: "The container {{ $labels.name }} has been using more than 90% of its memory limit for more than 5 minutes."
+
+  - alert: HighApiResponseTime
+    expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, path)) > 1
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High API response time on path {{ $labels.path }}"
+      description: "The 99th percentile of API response time for path {{ $labels.path }} is over 1 second."
+
+  - alert: DatabaseConnectionFailure
+    expr: increase(database_connection_errors_total[5m]) > 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Database connection failures detected"
+      description: "There have been database connection failures in the last 5 minutes."
